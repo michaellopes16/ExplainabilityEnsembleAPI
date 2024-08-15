@@ -561,4 +561,4 @@ class GRAD_CAM_Method:
 # dataFrame = api.create_df_2(list_weights=heatmap)
 # df_GRAD = api.get_most_important_features(dataFrame, 3)
 
-!pip freeze > requirements.txt
+#!pip freeze > requirements.txt
