@@ -9,12 +9,6 @@ Original file is located at
 # **Install Libs**
 """
 
-# !jupyter nbconvert --to script ExplainableAPI.ipynb
-
-# !pip install lime==0.1.1.37
-
-# !pip install shap==0.46.0
-
 """# **IMPORTS**"""
 
 # prompt: crie um classe em python chamada ExplainableAPI com o método load_data que recebe o caminho, o separador e retorna um x e um y
@@ -29,6 +23,7 @@ from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from keras.models import load_model
 # from multipledispatch import dispatch
+import matplotlib.pyplot as plt
 
 import lime.lime_tabular # !pip install lime==0.1.1.37
 import shap #!pip install shap==0.46.0
@@ -67,8 +62,7 @@ class ExplainableAPI:
             f.name,VOC_Count, v.VOC_Category;
         '''
   def __init__(self, features_name):
-    self.features_name = features_name;
-
+    self.features_name = features_name
   def load_data(self, path, sep):
       data = pd.read_csv(path, delimiter=sep,header=None)
       print()
@@ -83,6 +77,10 @@ class ExplainableAPI:
       })
       return df
 
+  def get_predicted_class(self, sample, model):
+      instancia = np.expand_dims(sample, axis=0)
+      result = model.predict(instancia)
+      return np.argmax(result[0]) + 1
 
   def create_df(self, list_weights, features):
       df = pd.DataFrame({
@@ -90,6 +88,31 @@ class ExplainableAPI:
       'Weight': list_weights
       })
       return df
+      #melhorar isso
+  def get_samples_from_db(self, X_train, y_train, predictedClass):
+      # Filtrar as instâncias pela classe desejadacd
+      indices_classe = np.where(y_train == predictedClass)[0]
+      X_classe = X_train[indices_classe]
+
+      # Selecionar 3 exemplos aleatórios das instâncias filtradas
+      amostras_aleatorias = X_classe[np.random.choice(X_classe.shape[0], 3, replace=False)]
+      # Converter cada exemplo selecionado em um DataFrame e armazenar em um array
+      dataframes = [pd.DataFrame(amostra.reshape(1, -1)) for amostra in amostras_aleatorias]
+      return dataframes
+
+  def plot_cycles(self,newDF):
+    # Plotando os dataframes em gráficos separados
+    for i, df in enumerate(newDF):
+        fig = plt.figure(figsize=[20,10])
+        plt.plot(df.T, label=f'Ciclo {i+1}')
+        plt.title(f'Gráfico de Linha do Ciclo {i+1}')
+        plt.xlabel('Índice')
+        plt.ylabel('Valores')
+        plt.legend()
+        plt.show()
+
+    # Mostrando o gráfico
+    plt.show()
 
   def weight_by_feature(self, features_name, weight_list):
       # Converte a lista de pesos em um array NumPy para facilitar a manipulação
@@ -104,6 +127,7 @@ class ExplainableAPI:
       # Cria o DataFrame a partir do array redimensionado
       df = pd.DataFrame(reshaped_array, columns=features_name)
       return df
+
   def get_final_result(self, wigths, feature):
       df = self.create_df(wigths, feature)
       self.ploat_heatmap(df)
@@ -112,6 +136,7 @@ class ExplainableAPI:
       df1.max().plot(kind='bar')
       df1.mean().plot(kind='bar')
       return df1
+
   def get_most_important_features(self, dataFrame, top_feature_number):
 
       df = self.weight_by_feature(self.features_name, dataFrame.Weight)
@@ -123,17 +148,14 @@ class ExplainableAPI:
       return top_features
 
   def concat_all_mothods(self, means_lime, means_shap, means_grad):
-      scaler = MinMaxScaler(feature_range=(-1, 1))
+      from sklearn.preprocessing import StandardScaler
+      scaler = StandardScaler()
       # Calculando as médias das colunas
       means_lime['Mean'] = scaler.fit_transform(means_lime[['Mean']])
       means_shap['Mean'] = scaler.fit_transform(means_shap[['Mean']])
       means_grad['Mean'] = scaler.fit_transform(means_grad[['Mean']])
 
-      # # Renomeando as colunas para facilitar a concatenação
-      # means_lime.columns = ['Column', 'Mean']
-      # means_shap.columns = ['Column', 'Mean']
-      # means_grad.columns = ['Column', 'Mean']
-      print(means_lime)
+      # Renomeando as colunas para facilitar a concatenação
       # Adicionando uma coluna para identificar o dataframe
       means_lime['DataFrame'] = 'LIME'
       means_shap['DataFrame'] = 'SHAP'
@@ -141,9 +163,6 @@ class ExplainableAPI:
 
       # Concatenando os dataframes
       means_all = pd.concat([means_lime, means_shap, means_grad])
-      print(means_all)
-      # means_all['Mean'] = scaler.fit_transform(means_all[['Mean']])
-      self.plot_bar_chart_all_methods(means_all)
       return means_all, means_lime, means_shap, means_grad
 
   def get_top_features(self,means_lime,means_shap,means_grad,top_index ):
@@ -157,13 +176,10 @@ class ExplainableAPI:
       top_3_3 = df_sorted_3.head(top_index)
 
       return top_3_1, top_3_2, top_3_3
+
   def get_features_in_common(self, df1, df2, df3):
       means_all, means_lime, means_shap, means_grad = self.concat_all_mothods(df1, df2, df3)
       top_3_1, top_3_2, top_3_3 = self.get_top_features(means_lime, means_shap, means_grad, 3 )
-      # Adicionar uma coluna de peso a cada DataFrame. Para remover os pesos, comentar essas linhas e a de média ponderada com o [X]
-      # top_3_1['Peso'] = 0.25
-      # top_3_2['Peso'] = 0.35
-      # top_3_3['Peso'] = 0.40
 
       df_concat = pd.concat([top_3_1, top_3_2, top_3_3])
       # Contar a frequência de cada valor na coluna 'Coluna'
@@ -173,19 +189,15 @@ class ExplainableAPI:
       # Criar um novo DataFrame com as linhas que têm 'Coluna' repetida
       df_final = df_concat[df_concat['Column'].isin(repeated_sensors)]
 
-      # Calcular a média ponderada para cada valor na coluna 'Coluna' [X]
-      # df_final = df_final.groupby('Column').apply(lambda x: (x['Peso'] * x.drop(columns=['Peso'])).sum() / x['Peso'].sum())
-
-      df_final = df_final.sort_values(by='Column')
-      return df_final
+      return df_final.sort_values(by='Column')
+  
   def get_sensor_repeats(self, df_final):
       coluna_counts = df_final['Column'].value_counts()
       df_counts = pd.DataFrame({
           'Sensors': coluna_counts.index,
           'Repeats': coluna_counts.values
       })
-      df_counts = df_counts.sort_values(by='Sensors').reset_index(drop=True)
-      return df_counts
+      return df_counts.sort_values(by='Sensors').reset_index(drop=True)
 
   def get_dict_by_query(self, query_sql, conn):
       cursor = conn.cursor()
@@ -220,35 +232,24 @@ class ExplainableAPI:
       # Retornar os 3 fungos mais compatíveis
       return compatibility[:3]
 
-  def print_result(self, sensor,fungi_dict, sensor_dict, df_caounts ):
-      for sensor in df_caounts.Sensors:
-          print(sensor)
-          top_fungi = self.find_top_compatible_fungi(sensor,fungi_dict,sensor_dict)
-          print(f"Os 3 fungos mais compatíveis com o sensor {sensor} são:")
-          for fungus, count, details in top_fungi:
-              print(f"{fungus} com {count} categorias compatíveis:")
-              for category, (sensor_count, fungus_count) in details.items():
-                  print(f"  - {category}: Sensor ({sensor_count} vezes), Fungo ({fungus_count} vezes)")
-              print()
+  def plot_samples_db(self, data):
+    for i, cycle in enumerate(data):
+        a = np.array(cycle)[0]
+        new_df = self.group_sensor(self.features_name, a)
+        self.plot_chart_line_df(new_df)
 
-  def plot_bar_chart_all_methods(self, dataFrame):
-      sns.set(style="whitegrid")
-      # Criando a figura com maior DPI e tamanho
-      plt.figure(figsize=(12, 8), dpi=200)
+  def group_sensor(self, features_name, row_cycle):
+        # Converte a lista de pesos em um array NumPy para facilitar a manipulação
+        weight_array = np.array(row_cycle)
+        # Calcula o número de linhas que o DataFrame terá
+        num_rows = len(row_cycle) // len(features_name)
+        # Redimensiona o array para ter 'num_rows' linhas e 'len(features_name)' colunas
+        reshaped_array = weight_array[:num_rows * len(features_name)].reshape(num_rows, len(features_name))
 
-      # Criando o gráfico de barras
-      sns.barplot(x='Column', y='Mean', hue='DataFrame', data=dataFrame, palette='viridis')
+        # Cria o DataFrame a partir do array redimensionado
+        df = pd.DataFrame(reshaped_array, columns=features_name)
 
-      # Adicionando labels e título
-      plt.xlabel('Sensors', fontweight='bold')
-      plt.ylabel('Average values', fontweight='bold')
-      plt.title('DataFrame Sensors Averages')
-
-      # Rotacionando os nomes das colunas no eixo X
-      plt.xticks(rotation=45)
-
-      # Exibindo o gráfico
-      plt.show()
+        return df
   # Adicionando uma coluna de índice para o eixo X
   def plot_chart_line_df(self, dataFrame):
       dataFrame['Index'] = dataFrame.index
@@ -290,9 +291,11 @@ class ExplainableAPI:
 """# **LIME METHOD**"""
 
 class LIME_Method:
-  def __init__(self):
+  def __init__(self, api):
+    self.api = api
     pass
   def run_LIME_Method(self, train_data, test_data,sample_index, model, class_names):
+    print("Running LIME...")
     feature_names = np.array(range(train_data.shape[1]))
     explainer = lime.lime_tabular.LimeTabularExplainer(
         training_data=train_data,
@@ -301,7 +304,6 @@ class LIME_Method:
         discretize_continuous=False  # ou True, dependendo da natureza dos seus dados
     )
     num_features = train_data.shape[1]
-    print(num_features)
     instance = test_data[sample_index]
     explanation = explainer.explain_instance(
         instance,
@@ -309,20 +311,18 @@ class LIME_Method:
         num_features= num_features
     )
     # Print the explanation
-    # for feature, weight in explanation.as_list():
-    #     print(f'{feature}: {weight}')
     feature , weigths = zip(*sorted(explanation.as_list()))
     weigths_array = np.array(weigths)
-    # weigths_matriz = weigths_array.reshape(1, -1)  # Redimensiona para 1 linha e 'n' colunas
     return explanation, feature , weigths_array
 
   def run_mulltiple_LIME_Method(self, train_data, test_data,sample_index, model, class_names,REPEATS):
+      print("Running LIME...")
       df_results = []
       for i in range(REPEATS):
           print(f"Cicle: {i+1} of {REPEATS}...")
-          explanation, index, wiegths = self.run_LIME_Method(train_data=X_train, test_data=X_test, sample_index=SAMPLE_INDEX, model=model, class_names=class_names)
-          dataFrame = api.create_df(wiegths, index)
-          df = api.get_most_important_features(dataFrame, 3)
+          explanation, index, wiegths = self.run_LIME_Method(train_data=train_data, test_data=test_data, sample_index=sample_index, model=model, class_names=class_names)
+          dataFrame = self.api.create_df(wiegths, index)
+          df = self.api.get_most_important_features(dataFrame, 3)
           df_results.append(df)
       return self.summarize_df(df_results)
 
@@ -353,9 +353,9 @@ class LIME_Method:
       barplot = sns.barplot(x='Column', y='Mean', hue='Column', data=df_final, palette='viridis')
 
       # Adicionar títulos e rótulos
-      plt.xlabel('Sensores')
-      plt.ylabel('Média')
-      plt.title('Média dos Sensores para o método LIME')
+      plt.xlabel('Sensors')
+      plt.ylabel('Average')
+      plt.title(f"DataFrame Sensors Averages to {df_final.DataFrame[0]}")
 
       # Mostrar o gráfico
       plt.show()
@@ -376,33 +376,33 @@ class LIME_Method:
       # Mostrar o gráfico
       plt.show()
 
-# df1 = api.get_final_result(wieghts,index)
 
 """# **SHAP METHOD**"""
 
 class SHAP_Method:
-  def __init__(self, features_name):
+  def __init__(self, features_name, api):
+    self.api = api
     self.features_name = features_name
   def run_SHAP_Method(self, train_data, test_data,sample_index, model, class_names, npermutations):
     # explainer = shap.KernelExplainer(model.predict, train_data)
+    print("Running SHAP...")
     explainer = shap.PermutationExplainer(model.predict, train_data)
     shap_values = explainer.shap_values(test_data[sample_index-1:sample_index], npermutations=npermutations)
 
     predicted_classes, main_class_predicted = self.get_model_results(model, test_data,sample_index )
 
     feature_weights = shap_values[:,:,main_class_predicted][0]  # Sum weights across classes #max_index
-    # culture_time_weigth = np.mean(feature_weights[0][train_data.shape[1]])
-    # mean_array = np.mean(feature_weights, axis=2)
-    # mean_array = mean_array[0][:-1]
-    # df2 = api.weight_by_feature(self.features_name, mean_array,culture_time_weigth)
+
     return explainer,shap_values, feature_weights
-  def run_mulltiple_SHAP_Method(self, train_data, test_data,sample_index, model, class_names,REPEATS, npermutations):
+  
+  def run_mulltiple_SHAP_Method(self, train_data, test_data,sample_index, model, class_names, npermutations, REPEATS):
+      print("Running SHAP...")
       df_results = []
       for i in range(REPEATS):
           print(f"Cicle: {i+1} of {REPEATS}...")
-          explanation, index, wieghts = self.run_SHAP_Method(train_data=X_train, test_data=X_test, sample_index=SAMPLE_INDEX, model=model, class_names=class_names, npermutations=npermutations)
-          dataFrame = api.create_df_2(wieghts)
-          df = api.get_most_important_features(dataFrame, 3)
+          explanation, index, wieghts = self.run_SHAP_Method(train_data=train_data, test_data=test_data, sample_index=sample_index, model=model, class_names=class_names, npermutations=npermutations)
+          dataFrame = self.api.create_df_2(wieghts)
+          df = self.api.get_most_important_features(dataFrame, 3)
           df_results.append(df)
       return self.summarize_df(df_results)
 
@@ -435,9 +435,9 @@ class SHAP_Method:
       barplot = sns.barplot(x='Column', y='Mean', hue='Column', data=df_final, palette='viridis')
 
       # Adicionar títulos e rótulos
-      plt.xlabel('Sensores')
-      plt.ylabel('Média')
-      plt.title('Média dos Sensores para o método LIME')
+      plt.xlabel('Sensors')
+      plt.ylabel('Average')
+      plt.title(f"DataFrame Sensors Averages to {df_final.DataFrame[0]}")
 
       # Mostrar o gráfico
       plt.show()
@@ -445,11 +445,13 @@ class SHAP_Method:
 """# **GRAD-CAM**"""
 
 class GRAD_CAM_Method:
-  def __init__(self, features_name):
+  def __init__(self, features_name, api):
+    self.api = api
     self.features_name = features_name
 
   def run_GRAD_CAM_Method(self, test_data,sample_index, model, class_names, last_layer_name):
       # Selecionar uma instância para visualização
+      print("Running GRAD_CAM...")
       instancia = test_data[sample_index]  # Por exemplo, a primeira instância do conjunto de dados
 
       # Preparar a instância para o modelo (adicionar uma dimensão extra se necessário)
@@ -494,9 +496,7 @@ class GRAD_CAM_Method:
       # Multiplicar cada canal na saída do feature map pelo "importance" desse canal
       heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1)
       return heatmap, grad_model, classe_prevista
-      # Normalizar o heatmap
-      # heatmap = np.maximum(heatmap, 0) / np.max(heatmap)
-      # heatmap
+
   def summarize_df(self, df_results):
       # Concatenar os DataFrames
       df_final = pd.concat(df_results, ignore_index=True)
@@ -518,15 +518,17 @@ class GRAD_CAM_Method:
 
       return df_final
 
-  def run_mulltiple_GRAD_Method(self, test_data,sample_index, model, class_names,REPEATS, last_layer_name):
+  def run_mulltiple_GRAD_Method(self, test_data,sample_index, model, class_names,last_layer_name, REPEATS):
+      print("Running GRAD_CAM...")
       df_results = []
       for i in range(REPEATS):
           print(f"Cicle: {i+1} of {REPEATS}...")
-          heatmap, grad_model, classe_prevista = self.run_GRAD_CAM_Method(test_data=X_test, sample_index=SAMPLE_INDEX, model=model, class_names=class_names,last_layer_name=last_layer_name)
-          dataFrame = api.create_df_2(heatmap)
-          df = api.get_most_important_features(dataFrame, 3)
+          heatmap, grad_model, classe_prevista = self.run_GRAD_CAM_Method(test_data=test_data, sample_index=sample_index, model=model, class_names=class_names,last_layer_name=last_layer_name)
+          dataFrame = self.api.create_df_2(heatmap)
+          df = self.api.get_most_important_features(dataFrame, 3)
           df_results.append(df)
       return self.summarize_df(df_results)
+
   def plot_heatmap(self, df_grad):
       # Criar o gráfico de barras
       fig = px.bar(df_grad, x='Feature', y='Weight', color='Weight', color_continuous_scale='Viridis')
@@ -551,14 +553,130 @@ class GRAD_CAM_Method:
       barplot = sns.barplot(x='Column', y='Mean', hue='Column', data=df_final, palette='viridis')
 
       # Adicionar títulos e rótulos
-      plt.xlabel('Sensores')
-      plt.ylabel('Média')
-      plt.title('Média dos Sensores para o método LIME')
+      plt.xlabel('Sensors')
+      plt.ylabel('Average')
+      plt.title(f"DataFrame Sensors Averages to {df_final.DataFrame[0]}")
 
       # Mostrar o gráfico
       plt.show()
 
-# dataFrame = api.create_df_2(list_weights=heatmap)
-# df_GRAD = api.get_most_important_features(dataFrame, 3)
+"""# **Run all methods**"""
 
-#!pip freeze > requirements.txt
+class Run_methods:
+  def __init__(self, api):
+      self.api = api
+      self.LIME = LIME_Method(self.api)
+      self.SHAP = SHAP_Method(self.api.features_name, self.api)
+      self.GRAD = GRAD_CAM_Method(self.api.features_name, self.api)
+
+  def run_all_methods_mult(self, X_train, X_test,sample_index, model, class_names, npermutations, last_layer_name, REPEATS):
+
+      df_LIME = self.LIME.run_mulltiple_LIME_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names, REPEATS=REPEATS)
+      df_shap = self.SHAP.run_mulltiple_SHAP_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names, npermutations=npermutations, REPEATS=REPEATS)
+      df_GRAD = self.GRAD.run_mulltiple_GRAD_Method(test_data=X_test, sample_index=sample_index, model=model,class_names=class_names, last_layer_name=last_layer_name, REPEATS=REPEATS)
+
+      df_final = self.api.get_features_in_common(df_LIME, df_shap, df_GRAD)
+      df_caounts = self.api.get_sensor_repeats(df_final)
+
+      return df_LIME, df_shap, df_GRAD, df_final, df_caounts
+
+  def run_2_methods_mult(self, X_train, X_test, sample_index, model, class_names,last_layer_name, REPEATS):
+
+      df_LIME = self.LIME.run_mulltiple_LIME_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names, REPEATS=REPEATS)
+      df_shap = pd.DataFrame(data={'Column':[0],'Mean':[0],'DataFrame':'SHAP'})
+      df_GRAD = self.GRAD.run_mulltiple_GRAD_Method(test_data=X_test, sample_index=sample_index, model=model,class_names=class_names, last_layer_name=last_layer_name, REPEATS=REPEATS)
+
+      df_final = self.api.get_features_in_common(df_LIME, df_shap, df_GRAD)
+      df_caounts = self.api.get_sensor_repeats(df_final)
+
+      return df_LIME, df_shap, df_GRAD, df_final, df_caounts
+
+  def run_all_methods_once(self, X_train, X_test,sample_index, model, class_names, npermutations,last_layer_name):
+
+      explanation, index, wiegths = self.LIME.run_LIME_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names)
+      dataFrame_1 = self.api.create_df(wiegths, index)
+      df_LIME = self.api.get_most_important_features(dataFrame_1, 3)
+
+      explainer,shap_values, feature_weights = self.SHAP.run_SHAP_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names, npermutations=npermutations)
+      dataFrame_2 = self.api.create_df_2(list_weights=feature_weights)
+      df_shap = self.api.get_most_important_features(dataFrame_2, 3)
+     
+      heatmap, grad_model, classe_prevista = self.GRAD.run_GRAD_CAM_Method(test_data=X_test, sample_index=sample_index, model=model,class_names=class_names, last_layer_name=last_layer_name)
+      dataFrame_3 = self.api.create_df_2(heatmap)
+      df_GRAD = self.api.get_most_important_features(dataFrame_3, 3)
+
+      df_final = self.api.get_features_in_common(df_LIME, df_shap, df_GRAD)
+      df_caounts = self.api.get_sensor_repeats(df_final)
+
+      return df_LIME, df_shap, df_GRAD, df_final, df_caounts
+
+  def run_2_methods_once(self, X_train, X_test,sample_index, model, class_names, last_layer_name):
+
+      explanation, index, wiegths = self.LIME.run_LIME_Method(train_data=X_train, test_data=X_test, sample_index=sample_index, model=model, class_names=class_names)
+      dataFrame_1 = self.api.create_df(wiegths, index)
+      df_LIME = self.api.get_most_important_features(dataFrame_1, 3)
+
+      df_shap = pd.DataFrame(data={'Column':[0],'Mean':[0],'DataFrame':'SHAP'})
+
+      heatmap, grad_model, classe_prevista = self.GRAD.run_GRAD_CAM_Method(test_data=X_test, sample_index=sample_index, model=model,class_names=class_names, last_layer_name=last_layer_name)
+      dataFrame_3 = self.api.create_df_2(heatmap)
+      df_GRAD = self.api.get_most_important_features(dataFrame_3, 3)
+
+      df_final = self.api.get_features_in_common(df_LIME, df_shap, df_GRAD)
+      df_caounts = self.api.get_sensor_repeats(df_final)
+
+      return df_LIME, df_shap, df_GRAD, df_final, df_caounts
+
+  def plot_all_bar_charts(self,df_LIME, df_shap, df_GRAD):
+      self.LIME.plot_bar_chart(df_LIME)
+      if(df_shap.Mean.mean() !=0):
+        self.SHAP.plot_bar_chart(df_shap)
+
+      self.GRAD.plot_bar_chart(df_GRAD)
+
+  def print_result(self, df_caounts, db_name, query_fungi, query_sensor):
+      import sqlite3
+      conn = sqlite3.connect(db_name)
+      fungi_dict, fungi = self.api.get_dict_by_query(query_fungi,conn)
+      sensor_dict, sensor = self.api.get_dict_by_query(query_sensor,conn)
+
+      for sensor in df_caounts.Sensors:
+        #   print(sensor)
+          top_fungi = self.api.find_top_compatible_fungi(sensor,fungi_dict,sensor_dict)
+          print(f"Os 3 fungos mais compatíveis com o sensor {sensor} são:")
+          for fungus, count, details in top_fungi:
+              print(f"{fungus} com {count} categorias compatíveis:")
+              for category, (sensor_count, fungus_count) in details.items():
+                  print(f"  - {category}: Sensor ({sensor_count} vezes), Fungo ({fungus_count} vezes)")
+              print()
+
+  def plot_bar_chart_all_methods(self, dataFrame):
+      sns.set(style="whitegrid")
+      # Criando a figura com maior DPI e tamanho
+      plt.figure(figsize=(12, 8), dpi=200)
+
+      # Criando o gráfico de barras
+      sns.barplot(x='Column', y='Mean', hue='DataFrame', data=dataFrame, palette='viridis')
+
+      # Adicionando labels e título
+      plt.xlabel('Sensors', fontweight='bold')
+      plt.ylabel('Average values', fontweight='bold')
+      plt.title('DataFrame Sensors Averages')
+
+      # Rotacionando os nomes das colunas no eixo X
+      plt.xticks(rotation=45)
+
+      # Exibindo o gráfico
+      plt.show()
+
+"""# **Teste**"""
+
+# features_name = ["TGS-826","TGS-2611","TGS-2603","TGS-813","TGS-822","TGS-2602","TGS-823"]
+# class_names = ['Albicans', 'Glabrata', 'Haemulonii', 'Kodamaea_ohmeri', 'Krusei', 'Parapsilosis']
+# api = ExplainableAPI(features_name)
+# X_train, y_train = api.load_data(path="AllCandidas_TRAIN.csv", sep=",")  # Replace with actual path and separator
+# X_test, y_test = api.load_data(path="AllCandidas_TEST.csv", sep=",")  # Replace with actual path and separator
+# SAMPLE_INDEX = 3# amostra que será selecionada do df de teste
+# model = tf.keras.models.load_model('/content/best_model.hdf5')
+
+# main = Run_methods(api)
